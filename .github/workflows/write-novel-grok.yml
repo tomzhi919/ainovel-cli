@@ -135,6 +135,27 @@ jobs:
           # Show first few files
           find workspace -name "*.md" 2>/dev/null | head -10 || true
 
+      - name: Commit & Push truyện lên GitHub repo
+        if: always()
+        run: |
+          mkdir -p novels/${{ github.event.inputs.stage_name }}
+          cp -r workspace/* novels/${{ github.event.inputs.stage_name }}/ 2>/dev/null || true
+          
+          # Cấu hình git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Commit thay đổi
+          git add novels/
+          if git diff --staged --quiet; then
+            echo "No new chapters to commit."
+          else
+            git commit -m "docs: cập nhật truyện stage ${{ github.event.inputs.stage_name }} (chương mới)"
+            # Push lên main
+            git push origin HEAD:main
+            echo "✅ Truyện đã được đẩy trực tiếp lên GitHub repo!"
+          fi
+
       - name: Upload workspace artifact (resume support)
         uses: actions/upload-artifact@v4
         if: always()
