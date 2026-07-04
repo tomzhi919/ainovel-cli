@@ -62,6 +62,7 @@ jobs:
             "model": "${{ github.event.inputs.model }}",
             "providers": {
               "9router-grok": {
+                "type": "openai",
                 "api_key": "${{ secrets.NINE_ROUTER_API_KEY }}",
                 "base_url": "https://9router.dieuhau.xyz/v1"
               }
