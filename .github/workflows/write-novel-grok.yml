@@ -1,0 +1,129 @@
+name: Write Novel (Grok via 9router)
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_name:
+        description: 'Stage name (e.g. cung1, ch13-25)'
+        required: true
+        default: 'cung1'
+      max_chapters:
+        description: 'Max chapters this job (8-15 recommended)'
+        required: true
+        default: '12'
+      prompt:
+        description: 'Initial prompt (leave empty for resume from artifact)'
+        required: false
+        default: ''
+      model:
+        description: 'Grok model alias (from 9router)'
+        required: true
+        default: 'xai/grok-4'
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download previous workspace (resume)
+        uses: actions/download-artifact@v4
+        with:
+          name: novel-workspace-${{ github.event.inputs.stage_name }}
+          path: workspace
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Tự nạp config 9router + Grok (from secret)
+        run: |
+          mkdir -p config
+          cat > config/config.json << 'EOF'
+          {
+            "provider": "9router-grok",
+            "model": "${{ github.event.inputs.model }}",
+
+            "providers": {
+              "9router-grok": {
+                "api_key": "${{ secrets.NINE_ROUTER_API_KEY }}",
+                "base_url": "https://9router.dieuhau.xyz/v1"
+              }
+            },
+
+            "roles": {
+              "coordinator": { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
+              "architect":   { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
+              "writer":      { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
+              "editor":      { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" }
+            },
+
+            "style": "default"
+          }
+          EOF
+          echo "✅ Config injected with Grok model ${{ github.event.inputs.model }}"
+
+      - name: Login to GHCR (for image)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull ainovel image
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:latest || echo "Image not found, will build if needed"
+
+      - name: Run ainovel-cli headless (Grok)
+        run: |
+          mkdir -p workspace
+          MAX_CH="${{ github.event.inputs.max_chapters }}"
+          PROMPT="${{ github.event.inputs.prompt }}"
+          if [ -z "$PROMPT" ]; then
+            PROMPT="Tiếp tục viết tiểu thuyết. Viết thêm tối đa $MAX_CH chương nữa rồi dừng lại. Giữ nguyên phong cách, nhân vật, cốt truyện đã có."
+          else
+            PROMPT="$PROMPT. Viết tối đa $MAX_CH chương."
+          fi
+
+          echo "Running with max chapters: $MAX_CH"
+          docker run --rm \
+            -v "$PWD/config:/root/.ainovel" \
+            -v "$PWD/workspace:/workspace" \
+            ghcr.io/${{ github.repository }}:latest \
+            --headless \
+            --prompt "$PROMPT" \
+            || true
+
+          echo "Done run"
+
+      - name: Count new chapters
+        id: count
+        run: |
+          COUNT=$(find workspace -name "chapter*.md" -o -path "*/chapters/*" 2>/dev/null | wc -l || echo 0)
+          echo "📊 Chapters in workspace: $COUNT"
+          echo "number_of_chapters=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Upload workspace artifact (resume)
+        uses: actions/upload-artifact@v4
+        with:
+          name: novel-workspace-${{ github.event.inputs.stage_name }}
+          path: workspace
+          retention-days: 30
+
+      - name: Upload chapters backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: novel-chapters-${{ github.event.inputs.stage_name }}
+          path: workspace
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "## ✅ Novel stage ${{ github.event.inputs.stage_name }} completed" >> $GITHUB_STEP_SUMMARY
+          echo "Model: ${{ github.event.inputs.model }} via 9router" >> $GITHUB_STEP_SUMMARY
+          echo "Chapters processed: ${{ steps.count.outputs.number_of_chapters }}" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,26 @@
+{
+  "provider": "9router-grok",
+  "model": "xai/grok-4",
+
+  "providers": {
+    "9router-grok": {
+      "api_key": "sk-your-9router-ainovel-key-here",
+      "base_url": "https://9router.dieuhau.xyz/v1",
+      "models": [
+        "xai/grok-4",
+        "xai/grok-4-fast-reasoning",
+        "xai/grok-code-fast-1",
+        "xai/grok-3"
+      ]
+    }
+  },
+
+  "roles": {
+    "coordinator": { "provider": "9router-grok", "model": "xai/grok-4" },
+    "architect":   { "provider": "9router-grok", "model": "xai/grok-4" },
+    "writer":      { "provider": "9router-grok", "model": "xai/grok-4" },
+    "editor":      { "provider": "9router-grok", "model": "xai/grok-4" }
+  },
+
+  "style": "default"
+}
