@@ -541,3 +541,62 @@ Xem chi tiết trong thư mục [`docs/`](docs/):
 ## Giấy phép
 
 MIT — Dự án gốc: [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)
+
+---
+
+### 9router + Grok (SuperGrok / xAI)
+
+Sử dụng **9router** (self-hosted router tại https://9router.dieuhau.xyz) để chạy **Grok** models cho ainovel-cli. 9router hỗ trợ auto token refresh, routing, và tiết kiệm.
+
+**Yêu cầu:**
+- 9router đã config xAI Grok (đã có).
+- Client key từ 9router (xem dashboard hoặc dùng script).
+- Trong GitHub repo: thêm Secret `NINE_ROUTER_API_KEY` = key của bạn.
+
+`config/config.json` (hoặc copy từ `config/config.9router-grok.example.json`):
+
+```json
+{
+  "provider": "9router-grok",
+  "model": "xai/grok-4",
+
+  "providers": {
+    "9router-grok": {
+      "api_key": "sk-your-9router-key-here",
+      "base_url": "https://9router.dieuhau.xyz/v1"
+    }
+  },
+
+  "roles": {
+    "coordinator": { "provider": "9router-grok", "model": "xai/grok-4" },
+    "architect":   { "provider": "9router-grok", "model": "xai/grok-4" },
+    "writer":      { "provider": "9router-grok", "model": "xai/grok-4" },
+    "editor":      { "provider": "9router-grok", "model": "xai/grok-4" }
+  }
+}
+```
+
+**Các model Grok qua 9router:**
+- `xai/grok-4`
+- `xai/grok-4-fast-reasoning`
+- `xai/grok-code-fast-1`
+- `xai/grok-3`
+
+**Chạy GitHub Actions (public repo, miễn phí phút):**
+1. Fork/clone repo của bạn.
+2. Vào **Settings > Secrets > Actions** → New secret: `NINE_ROUTER_API_KEY` (dán key 9router).
+3. Vào **Actions** → **Write Novel (Grok via 9router)** → Run workflow.
+4. Nhập stage_name, max_chapters (8-15), prompt (lần đầu đầy đủ, sau để trống để resume).
+5. Workflow tự inject config + chạy với Grok.
+
+Artifact resume tự động cho các stage tiếp theo.
+
+**Local / VPS:**
+```bash
+cp config/config.9router-grok.example.json config/config.json
+# edit api_key nếu cần
+./ainovel-cli --headless --prompt "..."
+```
+
+> 9router key được quản lý tập trung, không hardcode vào repo.
+
