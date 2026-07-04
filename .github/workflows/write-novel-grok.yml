@@ -107,13 +107,23 @@ jobs:
           echo "Max chapters: $MAX_CH"
           echo "Stage: ${{ github.event.inputs.stage_name }}"
 
+          # Ghi prompt ra file để tránh shell escaping issues
+          echo "$PROMPT" > /tmp/novel-prompt.txt
+
+          # Chạy headless: --prompt-file để tránh lỗi shell quoting
+          # KHÔNG truyền positional args (gây lỗi "không còn hỗ trợ")
           ainovel-cli \
             --headless \
-            --prompt "$PROMPT" \
-            --output workspace \
+            --prompt-file /tmp/novel-prompt.txt \
             2>&1 | tee /tmp/ainovel-run.log || true
 
           echo "✅ Run complete"
+
+          # Copy output (ainovel lưu trong ~/.ainovel/<hash>/) sang workspace
+          find $HOME/.ainovel -name "*.md" -newer /tmp/novel-prompt.txt 2>/dev/null \
+            | head -200 \
+            | xargs -I{} cp {} workspace/ 2>/dev/null || true
+          echo "Files copied to workspace: $(ls workspace/ | wc -l)"
 
       - name: Count chapters written
         id: count
