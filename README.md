@@ -600,3 +600,34 @@ cp config/config.9router-grok.example.json config/config.json
 
 > 9router key được quản lý tập trung, không hardcode vào repo.
 
+
+---
+
+## Web Dashboard để cấu hình truyện (khuyến nghị)
+
+Để tiện hơn là phải vào GitHub Actions mỗi lần, mình đã làm sẵn **Web Dashboard** đẹp để:
+
+- Chọn stage, số chương, prompt, model Grok
+- Trigger workflow 1-click
+- Xem danh sách recent runs + link trực tiếp
+- Dùng PAT (lưu trong trình duyệt)
+
+### 1. Dùng trên VPS (khuyến nghị)
+- Truy cập: **https://novel.dieuhau.xyz** (sau khi thêm DNS)
+- Hoặc local: chạy `cd ~/ainovel-web-dashboard && python3 -m http.server 8788`
+
+### 2. Dùng trực tiếp từ GitHub (GitHub Pages)
+1. Vào repo Settings → Pages
+2. Source: Deploy from branch → `grok-via-9router` / `root`
+3. Truy cập: `https://tomzhi919.github.io/ainovel-cli/dashboard/`
+
+### 3. Cách dùng
+1. Mở dashboard
+2. Nhấn "Cài đặt" → paste GitHub PAT (scope: `repo` + `workflow`)
+3. Điền stage (ví dụ `cung2`), max chapters, prompt (lần đầu đầy đủ, sau để trống = resume)
+4. Chọn model Grok → **Trigger Workflow**
+
+Dashboard tự gọi GitHub API để dispatch workflow và hiển thị runs.
+
+**Lưu ý**: PAT chỉ lưu ở trình duyệt của bạn, không gửi về đâu cả.
+
