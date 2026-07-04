@@ -12,17 +12,17 @@ on:
         required: true
         default: '12'
       prompt:
-        description: 'Initial prompt (leave empty for resume from artifact)'
+        description: 'Initial prompt (leave empty to resume from last artifact)'
         required: false
         default: ''
       model:
-        description: 'Grok model alias (from 9router)'
+        description: 'Model via 9router (e.g. xai/grok-4, xai/grok-code-fast-1)'
         required: true
-        default: 'xai/grok-4'
+        default: 'xai/grok-code-fast-1'
 
 permissions:
   contents: write
-  packages: read
+  packages: write
 
 jobs:
   write:
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download previous workspace (resume)
+      - name: Download previous workspace (resume nếu có)
         uses: actions/download-artifact@v4
         with:
           name: novel-workspace-${{ github.event.inputs.stage_name }}
@@ -41,89 +41,121 @@ jobs:
           merge-multiple: true
         continue-on-error: true
 
-      - name: Tự nạp config 9router + Grok (from secret)
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build ainovel-cli binary
         run: |
-          mkdir -p config
-          cat > config/config.json << 'EOF'
+          go build -trimpath -ldflags="-s -w" -o /usr/local/bin/ainovel-cli ./cmd/ainovel-cli
+          echo "✅ Built ainovel-cli OK"
+          ainovel-cli --version 2>/dev/null || ainovel-cli --help 2>/dev/null | head -3 || true
+
+      - name: Inject 9router config (từ secret, không hardcode)
+        run: |
+          mkdir -p $HOME/.ainovel
+          cat > $HOME/.ainovel/config.json << EOF
           {
             "provider": "9router-grok",
             "model": "${{ github.event.inputs.model }}",
-
             "providers": {
               "9router-grok": {
                 "api_key": "${{ secrets.NINE_ROUTER_API_KEY }}",
                 "base_url": "https://9router.dieuhau.xyz/v1"
               }
             },
-
             "roles": {
               "coordinator": { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
               "architect":   { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
               "writer":      { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" },
               "editor":      { "provider": "9router-grok", "model": "${{ github.event.inputs.model }}" }
             },
-
             "style": "default"
           }
           EOF
-          echo "✅ Config injected with Grok model ${{ github.event.inputs.model }}"
+          echo "✅ Config injected: model=${{ github.event.inputs.model }}"
 
-      - name: Login to GHCR (for image)
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull ainovel image
+      - name: Verify 9router connection
         run: |
-          docker pull ghcr.io/${{ github.repository }}:latest || echo "Image not found, will build if needed"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.NINE_ROUTER_API_KEY }}" \
+            https://9router.dieuhau.xyz/v1/models)
+          echo "9router /v1/models status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "⚠️ 9router not reachable (status $STATUS) — continuing anyway"
+          else
+            echo "✅ 9router online"
+          fi
 
-      - name: Run ainovel-cli headless (Grok)
+      - name: Run ainovel-cli headless (Grok via 9router)
         run: |
           mkdir -p workspace
           MAX_CH="${{ github.event.inputs.max_chapters }}"
           PROMPT="${{ github.event.inputs.prompt }}"
+
           if [ -z "$PROMPT" ]; then
-            PROMPT="Tiếp tục viết tiểu thuyết. Viết thêm tối đa $MAX_CH chương nữa rồi dừng lại. Giữ nguyên phong cách, nhân vật, cốt truyện đã có."
+            PROMPT="Tiếp tục viết tiểu thuyết. Viết thêm tối đa ${MAX_CH} chương nữa rồi dừng lại. Giữ nguyên phong cách, nhân vật, cốt truyện đã có."
+            echo "📌 Resume mode — prompt tự động"
           else
-            PROMPT="$PROMPT. Viết tối đa $MAX_CH chương."
+            PROMPT="${PROMPT}. Viết tối đa ${MAX_CH} chương."
+            echo "📌 New stage — prompt từ input"
           fi
 
-          echo "Running with max chapters: $MAX_CH"
-          docker run --rm \
-            -v "$PWD/config:/root/.ainovel" \
-            -v "$PWD/workspace:/workspace" \
-            ghcr.io/${{ github.repository }}:latest \
+          echo "Model: ${{ github.event.inputs.model }}"
+          echo "Max chapters: $MAX_CH"
+          echo "Stage: ${{ github.event.inputs.stage_name }}"
+
+          ainovel-cli \
             --headless \
             --prompt "$PROMPT" \
-            || true
+            --output workspace \
+            2>&1 | tee /tmp/ainovel-run.log || true
 
-          echo "Done run"
+          echo "✅ Run complete"
 
-      - name: Count new chapters
+      - name: Count chapters written
         id: count
         run: |
-          COUNT=$(find workspace -name "chapter*.md" -o -path "*/chapters/*" 2>/dev/null | wc -l || echo 0)
-          echo "📊 Chapters in workspace: $COUNT"
-          echo "number_of_chapters=$COUNT" >> $GITHUB_OUTPUT
+          COUNT=$(find workspace -name "*.md" 2>/dev/null | wc -l || echo 0)
+          echo "📊 Chapters/files in workspace: $COUNT"
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          # Show first few files
+          find workspace -name "*.md" 2>/dev/null | head -10 || true
 
-      - name: Upload workspace artifact (resume)
+      - name: Upload workspace artifact (resume support)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: novel-workspace-${{ github.event.inputs.stage_name }}
           path: workspace
           retention-days: 30
+          overwrite: true
 
-      - name: Upload chapters backup
+      - name: Upload chapters backup (90 ngày)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: novel-chapters-${{ github.event.inputs.stage_name }}
+          name: novel-chapters-${{ github.event.inputs.stage_name }}-${{ github.run_number }}
           path: workspace
           retention-days: 90
 
+      - name: Upload run log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-log-${{ github.event.inputs.stage_name }}-${{ github.run_number }}
+          path: /tmp/ainovel-run.log
+          retention-days: 7
+
       - name: Summary
         run: |
-          echo "## ✅ Novel stage ${{ github.event.inputs.stage_name }} completed" >> $GITHUB_STEP_SUMMARY
-          echo "Model: ${{ github.event.inputs.model }} via 9router" >> $GITHUB_STEP_SUMMARY
-          echo "Chapters processed: ${{ steps.count.outputs.number_of_chapters }}" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Stage **${{ github.event.inputs.stage_name }}** completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | \`${{ github.event.inputs.model }}\` via 9router |" >> $GITHUB_STEP_SUMMARY
+          echo "| Max chapters | ${{ github.event.inputs.max_chapters }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Files written | ${{ steps.count.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
